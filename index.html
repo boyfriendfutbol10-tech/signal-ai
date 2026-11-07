@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#101827">
 <title>SIGNAL AI | Simulador</title>
+<link rel="manifest" href="./manifest.webmanifest">
 <style>
 :root{color-scheme:dark;--bg:#0b1220;--panel:#141f30;--line:#26364d;--muted:#9aabc1;--text:#edf4ff;--green:#35d49a;--red:#ff6878;--yellow:#f4c45e}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#0b1220,#101b2c);color:var(--text);font:15px system-ui,Arial,sans-serif;padding:16px;max-width:760px;margin:auto}
@@ -17,19 +18,18 @@ button{background:#1d755c;border:0;font-weight:700;margin-top:12px}button:active
 .levels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.level{background:#0e1929;border-radius:10px;padding:10px}.level small{display:block;color:var(--muted);font-size:10px}.level b{font-size:13px;word-break:break-word}
 .note{font-size:12px;line-height:1.5;color:var(--muted)}.status{font-size:12px;color:var(--muted);margin-top:10px}.good{color:var(--green)}.bad{color:var(--red)}
 ul{padding-left:18px;margin:8px 0}li{margin:5px 0}.footer{text-align:center;color:var(--muted);font-size:11px;padding:15px}
+
+.history-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:12px 0}
+.stat{background:#0e1929;border-radius:10px;padding:9px;text-align:center}.stat small{display:block;color:var(--muted);font-size:10px}.stat b{display:block;font-size:17px;margin-top:3px}
+.history-item{background:#0e1929;border:1px solid var(--line);border-radius:11px;padding:11px;margin:9px 0}
+.history-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}.history-actions{display:flex;gap:7px;flex-wrap:wrap}.history-actions button,.clear-history{width:auto;padding:8px 10px;font-size:12px;margin-top:8px}
+.history-actions .win-btn{background:#176b54}.history-actions .loss-btn{background:#7b2e3b}.history-actions .open-btn{background:#38465b}
+.history-meta{font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px}.history-empty{color:var(--muted);font-size:13px;text-align:center;padding:12px}
+@media(max-width:380px){.history-stats{grid-template-columns:repeat(2,1fr)}}
+
 </style>
- <link rel="manifest" href="./manifest.webmanifest">
-<meta name="theme-color" content="#101827">
- </head>
- <body>
-<script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js")
-      .catch(error => console.warn("Error al registrar SIGNAL AI:", error));
-  });
-}
-</script>
+</head>
+<body>
 <header><div class="brand">SIGNAL <span>AI</span></div><div class="pill">SIMULACIÓN · SIN ÓRDENES</div></header>
 <div class="card">
  <div class="controls">
@@ -75,13 +75,62 @@ if ("serviceWorker" in navigator) {
  </ul>
  <p class="note">Se requieren al menos 4 de 5 criterios. El análisis usa la última vela cerrada. No incorpora comisiones, deslizamiento ni financiación.</p>
 </div>
-<div class="footer">SIGNAL AI V1 · Herramienta educativa · No ejecuta operaciones · No solicita claves API</div>
+
+<div class="card" id="historyPanel">
+ <div class="row"><b>Historial de señales</b><button class="clear-history" id="clearHistory" type="button">Borrar historial</button></div>
+ <div class="history-stats">
+  <div class="stat"><small>Señales</small><b id="hTotal">0</b></div>
+  <div class="stat"><small>Abiertas</small><b id="hOpen">0</b></div>
+  <div class="stat"><small>Ganadas</small><b id="hWins">0</b></div>
+  <div class="stat"><small>Perdidas</small><b id="hLosses">0</b></div>
+ </div>
+ <div class="muted" id="hRate" style="font-size:12px">Acierto: —</div>
+ <p class="note">El historial se guarda únicamente en este teléfono/navegador. Marca manualmente el resultado cuando el precio alcance el objetivo o el stop. Las señales ESPERAR no cuentan como operaciones simuladas.</p>
+ <div id="historyList"><div class="history-empty">Todavía no hay señales guardadas.</div></div>
+</div>
+
+<div class="footer">SIGNAL AI V2 · Simulación educativa · No ejecuta operaciones · No solicita claves API</div>
 <script>
 const $=id=>document.getElementById(id);
 const fmt=n=>Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits: n<1?6:2});
 function ema(values,period){let k=2/(period+1),out=[],v=values[0];out.push(v);for(let i=1;i<values.length;i++){v=values[i]*k+v*(1-k);out.push(v)}return out}
 function rsi(values,p=14){let gains=0,losses=0;for(let i=values.length-p;i<values.length;i++){let d=values[i]-values[i-1];if(d>0)gains+=d;else losses-=d}let ag=gains/p,al=losses/p;if(al===0)return 100;return 100-100/(1+ag/al)}
 function calcATR(c,p=14){let trs=[];for(let i=1;i<c.length;i++){let prev=c[i-1].close;trs.push(Math.max(c[i].high-c[i].low,Math.abs(c[i].high-prev),Math.abs(c[i].low-prev)))}return trs.slice(-p).reduce((a,b)=>a+b,0)/p}
+
+const HISTORY_KEY='signal_ai_history_v2';
+function readHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]')}catch(e){return []}}
+function writeHistory(items){try{localStorage.setItem(HISTORY_KEY,JSON.stringify(items));return true}catch(e){$('status').textContent='No se pudo guardar el historial en este navegador.';return false}}
+function money(n){return '$'+fmt(Number(n))}
+function renderHistory(){
+ const items=readHistory(),trades=items.filter(x=>x.signal==='LONG'||x.signal==='SHORT');
+ const wins=trades.filter(x=>x.outcome==='GANADA').length,losses=trades.filter(x=>x.outcome==='PERDIDA').length,open=trades.filter(x=>x.outcome==='ABIERTA').length,closed=wins+losses;
+ $('hTotal').textContent=trades.length;$('hOpen').textContent=open;$('hWins').textContent=wins;$('hLosses').textContent=losses;
+ $('hRate').textContent='Acierto entre operaciones cerradas: '+(closed?((wins/closed)*100).toFixed(1)+'%':'—');
+ const list=$('historyList');list.textContent='';
+ if(!items.length){const empty=document.createElement('div');empty.className='history-empty';empty.textContent='Todavía no hay señales guardadas.';list.appendChild(empty);return}
+ items.slice().reverse().forEach(item=>{
+  const card=document.createElement('div');card.className='history-item';
+  const head=document.createElement('div');head.className='history-head';
+  const title=document.createElement('b');title.textContent=item.symbol+' · '+item.interval+' · '+item.signal;title.className=item.signal==='LONG'?'long':item.signal==='SHORT'?'short':'wait';
+  const outcome=document.createElement('span');outcome.className='pill';outcome.textContent=item.signal==='ESPERAR'?'NO APLICA':item.outcome;head.append(title,outcome);card.appendChild(head);
+  const meta=document.createElement('div');meta.className='history-meta';
+  const dt=new Date(item.candleTime||item.createdAt);meta.textContent='Vela: '+dt.toLocaleString('es-CO')+' · Entrada '+money(item.entry)+' · SL '+(item.sl?money(item.sl):'—')+' · TP '+(item.tp?money(item.tp):'—')+' · '+item.score;card.appendChild(meta);
+  if(item.signal==='LONG'||item.signal==='SHORT'){
+   const actions=document.createElement('div');actions.className='history-actions';
+   [['GANADA','Marcar objetivo alcanzado','win-btn'],['PERDIDA','Marcar stop alcanzado','loss-btn'],['ABIERTA','Dejar abierta','open-btn']].forEach(([value,label,cls])=>{
+    const btn=document.createElement('button');btn.type='button';btn.className=cls;btn.textContent=label;btn.addEventListener('click',()=>setOutcome(item.id,value));actions.appendChild(btn);
+   });card.appendChild(actions);
+  }
+  list.appendChild(card);
+ });
+}
+function saveSignal(record){
+ const items=readHistory();if(items.some(x=>x.id===record.id))return;
+ items.push(record);while(items.length>100)items.shift();writeHistory(items);renderHistory();
+}
+function setOutcome(id,outcome){const items=readHistory(),item=items.find(x=>x.id===id);if(!item)return;item.outcome=outcome;item.outcomeUpdatedAt=new Date().toISOString();writeHistory(items);renderHistory()}
+$('clearHistory').addEventListener('click',()=>{if(confirm('¿Borrar todo el historial guardado en este teléfono?')){localStorage.removeItem(HISTORY_KEY);renderHistory()}});
+renderHistory();
 async function analyze(){
  const symbol=$('symbol').value,interval=$('interval').value;
  $('status').textContent='Consultando datos públicos de Binance…';
@@ -122,6 +171,9 @@ async function analyze(){
   $('entry').textContent='$'+fmt(price);
   $('sl').textContent=signal==='LONG'?'$'+fmt(price-1.5*atr):signal==='SHORT'?'$'+fmt(price+1.5*atr):'—';
   $('tp').textContent=signal==='LONG'?'$'+fmt(price+2*atr):signal==='SHORT'?'$'+fmt(price-2*atr):'—';
+  const entry=price,stop=signal==='LONG'?price-1.5*atr:signal==='SHORT'?price+1.5*atr:null,target=signal==='LONG'?price+2*atr:signal==='SHORT'?price-2*atr:null;
+  const candleTime=last.time;
+  saveSignal({id:symbol+'_'+interval+'_'+candleTime,symbol,interval,signal,score:signal==='LONG'?`LONG ${lc}/5`:`SHORT ${sc}/5`,entry,sl:stop,tp:target,candleTime,createdAt:new Date().toISOString(),outcome:(signal==='LONG'||signal==='SHORT')?'ABIERTA':'NO APLICA'});
   $('status').textContent='Datos recibidos correctamente. Análisis basado en velas cerradas.';
  }catch(e){$('status').textContent='No se pudo actualizar: '+e.message+'. Comprueba tu conexión e inténtalo de nuevo.';$('updated').textContent='Sin conexión'}
  finally{$('refresh').disabled=false}
@@ -129,5 +181,8 @@ async function analyze(){
 $('refresh').addEventListener('click',analyze);
 $('symbol').addEventListener('change',analyze);$('interval').addEventListener('change',analyze);
 analyze();setInterval(analyze,60000);
+</script>
+<script>
+if ("serviceWorker" in navigator) { window.addEventListener("load", () => { navigator.serviceWorker.register("./service-worker.js").catch(error => console.warn("Error al registrar SIGNAL AI:", error)); }); }
 </script>
 </body></html>
